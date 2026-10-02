@@ -3,7 +3,7 @@
  * - Map tiles: cached as you view them (capped), so areas you've seen load offline.
  * - Parcel lookups: always live (never cached); the app retries them when signal returns.
  */
-const VERSION = 'd4d-v1';
+const VERSION = 'd4d-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',

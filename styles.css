@@ -143,6 +143,28 @@ svg { width: 22px; height: 22px; fill: currentColor; flex: none; }
 .mini-tags span { font-size: 11px; background: var(--cream); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
 .empty { padding: 32px 16px; text-align: center; color: var(--muted); }
 
+/* List tabs: Pins | Sessions */
+.tabbar { display: flex; background: var(--navy); padding: 0 12px; gap: 4px; }
+.tab { flex: 1; border: 0; background: none; color: #c9d3e3; font-weight: 700; font-size: 15px; padding: 10px 0 12px;
+  border-bottom: 3px solid transparent; cursor: pointer; }
+.tab.on { color: #fff; border-bottom-color: var(--amber); }
+.view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.panel-tools select { min-width: 0; }
+
+/* Session cards */
+.session { padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff; }
+.session-top { display: flex; gap: 12px; align-items: flex-start; }
+.session-count { flex: none; text-align: center; min-width: 52px; background: var(--cream); border-radius: 10px; padding: 6px 8px; }
+.session-count b { display: block; font-size: 20px; color: var(--navy); line-height: 1.1; }
+.session-count span { font-size: 11px; color: var(--muted); }
+.session-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.session .mini-tags span { display: inline-flex; align-items: center; gap: 4px; }
+.session .mini-tags .lead-dot { width: 8px; height: 8px; margin: 0; }
+.btn-sm { min-height: 36px; padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.badge { display: inline-block; vertical-align: middle; font-size: 11px; font-weight: 800; color: #fff; background: var(--ok);
+  border-radius: 999px; padding: 2px 8px; margin-left: 4px; }
+
 .toast { position: fixed; left: 12px; right: 12px; bottom: calc(var(--bb-h) + var(--sab) + 12px); z-index: 1400; display: flex; align-items: center;
   gap: 12px; background: #222; color: #fff; padding: 12px 14px; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.35); font-size: 14px; }
 .toast span { flex: 1; }

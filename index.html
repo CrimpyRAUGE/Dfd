@@ -60,26 +60,56 @@
   <!-- Pin detail sheet: "peek" shows the header, "full" shows everything -->
   <section id="sheet" class="sheet" hidden aria-live="polite"></section>
 
-  <!-- Lead list -->
+  <!-- Lead list: pins and driving sessions -->
   <section id="listPanel" class="panel" hidden>
     <div class="panel-head">
       <h2>Leads <span id="listCount" class="muted"></span></h2>
       <button class="icon-btn" type="button" data-close="listPanel" aria-label="Close list">&times;</button>
     </div>
-    <div class="panel-tools">
-      <input id="listSearch" type="search" placeholder="Search address, parcel, notes, owner" autocomplete="off">
-      <div class="row">
-        <select id="filterStatus" aria-label="Filter by status"></select>
-        <select id="filterTag" aria-label="Filter by tag"></select>
-      </div>
-      <div class="row wrap">
-        <button id="btnExport" class="btn btn-primary" type="button">Export CSV for skip trace</button>
-        <button id="btnCopyIds" class="btn" type="button">Copy parcel #s</button>
-        <button id="btnMarkSent" class="btn" type="button">Mark as sent</button>
-      </div>
-      <p id="listNote" class="muted small"></p>
+    <div class="tabbar" role="tablist">
+      <button id="tabPins" class="tab on" type="button" role="tab" data-tab="pins" aria-selected="true">Pins</button>
+      <button id="tabSessions" class="tab" type="button" role="tab" data-tab="sessions" aria-selected="false">Sessions</button>
     </div>
-    <ul id="leadList" class="lead-list"></ul>
+
+    <div id="pinsView" class="view">
+      <div class="panel-tools">
+        <input id="listSearch" type="search" placeholder="Search address, parcel, notes, owner" autocomplete="off">
+        <div class="row">
+          <select id="filterStatus" aria-label="Filter by status"></select>
+          <select id="filterTag" aria-label="Filter by tag"></select>
+        </div>
+        <div class="row">
+          <select id="filterSession" aria-label="Filter by driving session"></select>
+          <select id="sortBy" aria-label="Sort pins">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="address">Address A to Z</option>
+            <option value="status">By status</option>
+            <option value="value">Highest value</option>
+          </select>
+        </div>
+        <div class="row wrap">
+          <button id="btnExport" class="btn btn-primary btn-sm" type="button">Export CSV for skip trace</button>
+          <button id="btnCopyIds" class="btn btn-sm" type="button">Copy parcel #s</button>
+          <button id="btnCopyList" class="btn btn-sm" type="button">Copy address list</button>
+          <button id="btnMarkSent" class="btn btn-sm" type="button">Mark as sent</button>
+        </div>
+        <p id="listNote" class="muted small"></p>
+      </div>
+      <ul id="leadList" class="lead-list"></ul>
+    </div>
+
+    <div id="sessionsView" class="view" hidden>
+      <div class="panel-tools">
+        <p id="sessionSummary" class="small"></p>
+        <div class="row wrap">
+          <button id="btnExportSessions" class="btn btn-primary btn-sm" type="button">Export sessions list</button>
+          <button id="btnCopySessions" class="btn btn-sm" type="button">Copy sessions list</button>
+        </div>
+        <p class="muted small">A session is one drive, from Start driving to Stop driving. Pins you drop while driving belong to that drive.</p>
+      </div>
+      <ul id="sessionList" class="lead-list"></ul>
+    </div>
   </section>
 
   <!-- Settings -->
