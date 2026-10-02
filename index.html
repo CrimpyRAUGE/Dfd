@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1B3D6F">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MK D4D">
+  <title>MK Driving for Dollars</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="map" aria-label="Map. Tap a property to pin it."></div>
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-mk">MK</span> D4D</div>
+    <div id="driveStat" class="chip chip-drive" hidden></div>
+    <div id="netStat" class="chip chip-off" hidden>Offline</div>
+    <button id="btnCount" class="chip chip-count" type="button">0 pins</button>
+  </header>
+
+  <div class="fabs">
+    <button id="btnSettings" class="fab" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+    </button>
+    <button id="btnLayer" class="fab" type="button" aria-label="Switch map style">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5zm-7.6 8.4L2 12.6l10 5 10-5-2.4-1.2L12 15.2l-7.6-3.8zm0 4L2 16.6l10 5 10-5-2.4-1.2L12 19.2l-7.6-3.8z"/></svg>
+    </button>
+    <button id="btnLocate" class="fab" type="button" aria-label="Center on my location">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 3h-2.1A7 7 0 0 0 13 5.1V3h-2v2.1A7 7 0 0 0 5.1 11H3v2h2.1a7 7 0 0 0 5.9 5.9V21h2v-2.1a7 7 0 0 0 5.9-5.9H21v-2zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
+    </button>
+  </div>
+
+  <div id="zoomHint" class="hint" hidden>Zoom in to see parcel lines</div>
+
+  <nav class="bottombar">
+    <button id="btnDrive" class="bb-btn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 6a1.5 1.5 0 0 0-1.4-1h-11a1.5 1.5 0 0 0-1.4 1L3 12v8a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h12v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-8l-2.1-6zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+      <span id="btnDriveLabel">Start driving</span>
+    </button>
+    <button id="btnPinHere" class="bb-btn bb-main" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+      <span>Pin my spot</span>
+    </button>
+    <button id="btnList" class="bb-btn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h2v2H3V5zm4 0h14v2H7V5zM3 11h2v2H3v-2zm4 0h14v2H7v-2zm-4 6h2v2H3v-2zm4 0h14v2H7v-2z"/></svg>
+      <span>List</span>
+    </button>
+  </nav>
+
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <!-- Pin detail sheet: "peek" shows the header, "full" shows everything -->
+  <section id="sheet" class="sheet" hidden aria-live="polite"></section>
+
+  <!-- Lead list -->
+  <section id="listPanel" class="panel" hidden>
+    <div class="panel-head">
+      <h2>Leads <span id="listCount" class="muted"></span></h2>
+      <button class="icon-btn" type="button" data-close="listPanel" aria-label="Close list">&times;</button>
+    </div>
+    <div class="panel-tools">
+      <input id="listSearch" type="search" placeholder="Search address, parcel, notes, owner" autocomplete="off">
+      <div class="row">
+        <select id="filterStatus" aria-label="Filter by status"></select>
+        <select id="filterTag" aria-label="Filter by tag"></select>
+      </div>
+      <div class="row wrap">
+        <button id="btnExport" class="btn btn-primary" type="button">Export CSV for skip trace</button>
+        <button id="btnCopyIds" class="btn" type="button">Copy parcel #s</button>
+        <button id="btnMarkSent" class="btn" type="button">Mark as sent</button>
+      </div>
+      <p id="listNote" class="muted small"></p>
+    </div>
+    <ul id="leadList" class="lead-list"></ul>
+  </section>
+
+  <!-- Settings -->
+  <section id="settingsPanel" class="panel" hidden>
+    <div class="panel-head">
+      <h2>Settings</h2>
+      <button class="icon-btn" type="button" data-close="settingsPanel" aria-label="Close settings">&times;</button>
+    </div>
+    <div class="panel-body">
+      <h3>Map</h3>
+      <label class="toggle"><input id="setLines" type="checkbox"> Show parcel lines (zoomed in)</label>
+      <label class="toggle"><input id="setRoutes" type="checkbox"> Show the routes I've driven</label>
+      <label class="toggle"><input id="setWake" type="checkbox"> Keep screen on while driving</label>
+
+      <h3>Tags</h3>
+      <p class="muted small">One tag per line. These show as quick buttons on each pin.</p>
+      <textarea id="setTags" rows="8"></textarea>
+
+      <h3>Parcel data sources</h3>
+      <p class="muted small">ArcGIS FeatureServer layer URLs, one per line, checked in order. The defaults are Utah's free public parcel layers from UGRC (Salt Lake County first, then statewide).</p>
+      <textarea id="setSources" rows="4" spellcheck="false"></textarea>
+      <div class="row wrap">
+        <button id="btnSaveSettings" class="btn btn-primary" type="button">Save settings</button>
+        <button id="btnResetSources" class="btn" type="button">Reset sources</button>
+      </div>
+
+      <h3>Backup</h3>
+      <p class="muted small">Your pins live on this device only. Back up now and then, or before switching phones.</p>
+      <div class="row wrap">
+        <button id="btnBackup" class="btn" type="button">Download backup</button>
+        <label class="btn" for="importFile">Restore backup</label>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+      </div>
+      <p id="storageInfo" class="muted small"></p>
+
+      <h3>Danger zone</h3>
+      <div class="row wrap">
+        <button id="btnClearRoutes" class="btn" type="button">Clear driven routes</button>
+        <button id="btnWipe" class="btn btn-danger" type="button">Delete all data</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="photoViewer" class="photo-viewer" hidden><img alt="Property photo"></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

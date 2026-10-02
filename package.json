@@ -1,0 +1,12 @@
+{
+  "name": "mk-driving-for-dollars",
+  "private": true,
+  "type": "module",
+  "description": "Tap-to-pin driving for dollars app. Static site; npm is only used for tests.",
+  "scripts": {
+    "test": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}
