@@ -103,6 +103,7 @@
   const pins = new Map();     // id -> pin record
   const markers = new Map();  // id -> L.Marker
   const outlines = new Map(); // id -> L.Polygon
+  const trails = new Map();   // id -> driving session (route + times)
   let selectedId = null;
   let sheetMode = 'hidden';   // hidden | peek | full
 
@@ -149,6 +150,7 @@
   const pinLayer = L.featureGroup().addTo(map);
   const trailLayer = L.featureGroup();
   const meLayer = L.featureGroup().addTo(map);
+  const focusLayer = L.featureGroup().addTo(map); // a session picked from the Sessions list
 
   // ── ArcGIS parcel queries ─────────────────────────────────────────────────
   async function arcQuery(url, params, signal) {
@@ -358,6 +360,7 @@
       id: uid(), lat: r6(latlng.lat), lng: r6(latlng.lng), how,
       parcelId: '', address: '', city: '', zip: '', county: '', details: {}, geom: null,
       tags: [], status: 'new', ownerName: '', notes: '', lookup: 'pending', createdAt: now, updatedAt: now,
+      sessionId: driving && trail ? trail.id : '',
     };
     pins.set(pin.id, pin);
     await DB.put('pins', pin);
@@ -535,6 +538,7 @@
     ].filter(([v]) => v);
     const gmaps = `https://www.google.com/maps/search/?api=1&query=${pin.lat},${pin.lng}`;
     const street = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pin.lat},${pin.lng}`;
+    const ses = trails.get(sessionOf(pin));
     const county = isSaltLake(pin) ? `https://slco.org/assessor/new/valuationInfoExpanded.cfm?parcel_id=${encodeURIComponent(pin.parcelId)}` : '';
 
     sheet.innerHTML = `
@@ -576,7 +580,7 @@
           ${county ? `<a href="${county}" target="_blank" rel="noopener">County record (owner)</a>` : ''}
           ${pin.lookup !== 'ok' ? '<a href="#" data-act="retry">Retry parcel lookup</a>' : ''}
         </div>
-        <p class="meta">Status color: <b style="color:${st.color}">${esc(st.label)}</b> · Added ${esc(fmtDate(pin.createdAt))} · ${pin.lat.toFixed(6)}, ${pin.lng.toFixed(6)}</p>
+        <p class="meta">Status color: <b style="color:${st.color}">${esc(st.label)}</b> · Added ${esc(fmtDate(pin.createdAt))}${ses ? ` on drive ${esc(sessionLabel(ses))}` : ''} · ${pin.lat.toFixed(6)}, ${pin.lng.toFixed(6)}</p>
       </div>`;
 
     if (sheetMode === 'full') renderPhotos(pin.id);
@@ -709,6 +713,7 @@
       const last = trail.points[trail.points.length - 1];
       if (!last || map.distance(last, [lat, lng]) >= 12) {
         trail.points.push([r6(lat), r6(lng)]);
+        trail.lastAt = Date.now();
         if (trailLine) trailLine.addLatLng([lat, lng]);
         clearTimeout(trailSaveTimer);
         trailSaveTimer = setTimeout(() => DB.put('trails', trail), 3000);
@@ -755,6 +760,7 @@
     driving = true;
     follow = true;
     trail = { id: uid(), startedAt: Date.now(), points: [] };
+    trails.set(trail.id, trail);
     trailLine = L.polyline([], { renderer: trailRenderer, color: '#1a73e8', weight: 4, opacity: 0.7, interactive: false });
     if (settings.showRoutes) trailLine.addTo(trailLayer);
     $('btnDrive').classList.add('on');
@@ -767,8 +773,16 @@
   async function stopDriving() {
     driving = false;
     clearTimeout(trailSaveTimer);
-    if (trail && trail.points.length > 1) { trail.endedAt = Date.now(); await DB.put('trails', trail); toast(`Drive saved: ${trailMiles(trail).toFixed(1)} miles.`); }
-    else if (trail) { await DB.del('trails', trail.id); if (trailLine) trailLayer.removeLayer(trailLine); }
+    if (trail && (trail.points.length > 1 || pinsInSession(trail.id).length)) {
+      trail.endedAt = Date.now();
+      await DB.put('trails', trail);
+      const n = pinsInSession(trail.id).length;
+      toast(`Drive saved: ${trailMiles(trail).toFixed(1)} miles, ${n} pin${n === 1 ? '' : 's'}.`);
+    } else if (trail) {
+      trails.delete(trail.id);
+      await DB.del('trails', trail.id);
+      if (trailLine) trailLayer.removeLayer(trailLine);
+    }
     trail = null;
     trailLine = null;
     $('btnDrive').classList.remove('on');
@@ -806,55 +820,153 @@
     trailLayer.clearLayers();
     if (!settings.showRoutes) { map.removeLayer(trailLayer); return; }
     trailLayer.addTo(map);
-    for (const t of await DB.all('trails')) {
+    for (const t of trails.values()) {
       if (trail && t.id === trail.id) continue;
       if (t.points.length > 1) L.polyline(t.points, { renderer: trailRenderer, color: '#1a73e8', weight: 4, opacity: 0.4, interactive: false }).addTo(trailLayer);
     }
     if (trailLine) trailLine.addTo(trailLayer);
   }
 
+  // ── Driving sessions ──────────────────────────────────────────────────────
+  // A session is one drive (Start driving → Stop driving). New pins carry the
+  // session id; older pins are matched to a drive by the time they were added.
+  const trailEnd = (t) => (trail && t.id === trail.id ? Date.now() : t.endedAt || t.lastAt || t.startedAt + 3 * 3600e3);
+  function sessionOf(pin) {
+    if (pin.sessionId) return trails.has(pin.sessionId) ? pin.sessionId : '';
+    for (const t of trails.values()) if (pin.createdAt >= t.startedAt && pin.createdAt <= trailEnd(t)) return t.id;
+    return '';
+  }
+  const pinsInSession = (id) => [...pins.values()].filter((p) => sessionOf(p) === id);
+  const sortedSessions = () => [...trails.values()].sort((a, b) => b.startedAt - a.startedAt);
+  const fmtTime = (t) => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const fmtDay = (t) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  const sessionLabel = (t) => t.name || `${fmtDay(t.startedAt)} · ${fmtTime(t.startedAt)}`;
+  const sessionMinutes = (t) => Math.max(0, Math.round((trailEnd(t) - t.startedAt) / 60000));
+  function fmtDuration(min) {
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h} h ${m} min` : `${m} min`;
+  }
+
   // ── Lead list + export ────────────────────────────────────────────────────
+  let listTab = 'pins';
   function fillFilters() {
-    const fs = $('filterStatus'), ft = $('filterTag');
-    const sv = fs.value, tv = ft.value;
+    const fs = $('filterStatus'), ft = $('filterTag'), fx = $('filterSession');
+    const sv = fs.value, tv = ft.value, xv = fx.value;
     fs.innerHTML = '<option value="">All statuses</option>' + STATUSES.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join('');
     const tags = new Set(settings.tags);
     for (const p of pins.values()) (p.tags || []).forEach((t) => tags.add(t));
     ft.innerHTML = '<option value="">All tags</option>' + [...tags].map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
     fs.value = sv; ft.value = [...tags].includes(tv) ? tv : '';
+    const sessions = sortedSessions();
+    fx.innerHTML = '<option value="">All sessions</option>'
+      + sessions.map((t) => `<option value="${esc(t.id)}">${esc(sessionLabel(t))}</option>`).join('')
+      + '<option value="none">Not during a drive</option>';
+    fx.value = xv === 'none' || trails.has(xv) ? xv : '';
   }
+  const SORTS = {
+    newest: (a, b) => b.createdAt - a.createdAt,
+    oldest: (a, b) => a.createdAt - b.createdAt,
+    address: (a, b) => (a.address || '￿').localeCompare(b.address || '￿', undefined, { numeric: true }) || b.createdAt - a.createdAt,
+    status: (a, b) => STATUSES.findIndex((s) => s.id === a.status) - STATUSES.findIndex((s) => s.id === b.status) || b.createdAt - a.createdAt,
+    value: (a, b) => (Number((b.details || {}).value) || 0) - (Number((a.details || {}).value) || 0) || b.createdAt - a.createdAt,
+  };
   function filteredPins() {
     const q = $('listSearch').value.trim().toLowerCase();
-    const st = $('filterStatus').value, tg = $('filterTag').value;
+    const st = $('filterStatus').value, tg = $('filterTag').value, ses = $('filterSession').value;
     return [...pins.values()]
       .filter((p) => !st || p.status === st)
       .filter((p) => !tg || (p.tags || []).includes(tg))
+      .filter((p) => !ses || sessionOf(p) === (ses === 'none' ? '' : ses))
       .filter((p) => !q || [p.address, p.city, p.zip, p.parcelId, prettyParcel(p), p.notes, p.ownerName, (p.tags || []).join(' ')]
         .join(' ').toLowerCase().includes(q))
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort(SORTS[$('sortBy').value] || SORTS.newest);
   }
   function renderList() {
+    if (listTab === 'sessions') { renderSessions(); return; }
     const list = filteredPins();
     $('listCount').textContent = `(${list.length}${list.length !== pins.size ? ' of ' + pins.size : ''})`;
     const missing = list.filter((p) => !p.parcelId).length;
     $('listNote').textContent = missing ? `${missing} pin${missing === 1 ? ' has' : 's have'} no parcel number yet. They export with GPS coordinates only.` : '';
     $('leadList').innerHTML = list.length ? list.map((p) => {
       const st = STATUS[p.status] || STATUS.new;
+      const ses = trails.get(sessionOf(p));
       return `<li class="lead" data-id="${p.id}">
         <span class="lead-dot" style="background:${st.color}" title="${esc(st.label)}"></span>
         <div class="lead-main">
           <div class="lead-addr">${esc(p.address || (p.lookup === 'pending' ? 'Looking up parcel...' : 'No parcel found'))}</div>
           <div class="lead-sub">${esc([p.city, p.zip].filter(Boolean).join(' '))}${p.parcelId ? ` · <span class="lead-pid">${esc(prettyParcel(p))}</span>` : ''}</div>
-          <div class="lead-sub">${esc(st.label)} · ${esc(fmtDate(p.createdAt))}</div>
+          <div class="lead-sub">${esc(st.label)} · ${esc(fmtDate(p.createdAt))}${ses ? ` · Drive: ${esc(sessionLabel(ses))}` : ''}</div>
           ${(p.tags || []).length ? `<div class="mini-tags">${p.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
         </div>
       </li>`;
     }).join('') : `<li class="empty">${pins.size ? 'No leads match these filters.' : 'No pins yet. Tap a property on the map to pin it.'}</li>`;
   }
+
+  function statusCounts(list) {
+    const counts = {};
+    for (const p of list) counts[p.status] = (counts[p.status] || 0) + 1;
+    return STATUSES.filter((s) => counts[s.id]).map((s) => ({ ...s, n: counts[s.id] }));
+  }
+  function renderSessions() {
+    const sessions = sortedSessions();
+    const loose = pinsInSession('');
+    const miles = sessions.reduce((m, t) => m + trailMiles(t), 0);
+    const inDrives = pins.size - loose.length;
+    $('listCount').textContent = `(${sessions.length} drive${sessions.length === 1 ? '' : 's'})`;
+    $('sessionSummary').innerHTML = sessions.length
+      ? `<b>${sessions.length}</b> drive${sessions.length === 1 ? '' : 's'} · <b>${miles.toFixed(1)}</b> mi · <b>${inDrives}</b> pin${inDrives === 1 ? '' : 's'} dropped while driving`
+      : 'No drives yet. Tap <b>Start driving</b> to record a session.';
+    const row = (id, title, sub, list, isDrive, live) => `
+      <li class="session" data-id="${esc(id)}">
+        <div class="session-top">
+          <div class="lead-main">
+            <div class="lead-addr">${esc(title)}${live ? ' <span class="badge">Driving now</span>' : ''}</div>
+            <div class="lead-sub">${sub}</div>
+            ${list.length ? `<div class="mini-tags">${statusCounts(list).map((s) => `<span style="border-color:${s.color}"><i class="lead-dot" style="background:${s.color}"></i>${s.n} ${esc(s.label)}</span>`).join('')}</div>` : ''}
+          </div>
+          <div class="session-count"><b>${list.length}</b><span>pin${list.length === 1 ? '' : 's'}</span></div>
+        </div>
+        <div class="session-actions">
+          <button class="btn btn-sm" type="button" data-sact="pins" ${list.length ? '' : 'disabled'}>View pins</button>
+          <button class="btn btn-sm" type="button" data-sact="map">Show on map</button>
+          <button class="btn btn-sm" type="button" data-sact="export" ${list.length ? '' : 'disabled'}>Export CSV</button>
+          ${isDrive ? `<button class="btn btn-sm" type="button" data-sact="rename">Rename</button>
+          ${live ? '' : '<button class="btn btn-sm btn-danger" type="button" data-sact="delete">Delete</button>'}` : ''}
+        </div>
+      </li>`;
+    const rows = sessions.map((t) => {
+      const list = pinsInSession(t.id);
+      const live = trail && t.id === trail.id;
+      const sub = [
+        t.name ? `${fmtDay(t.startedAt)}` : '',
+        `${fmtTime(t.startedAt)} to ${live ? 'now' : fmtTime(trailEnd(t))}`,
+        fmtDuration(sessionMinutes(t)),
+        `${trailMiles(t).toFixed(1)} mi`,
+      ].filter(Boolean).map(esc).join(' · ');
+      return row(t.id, sessionLabel(t), sub, list, true, live);
+    });
+    if (loose.length) rows.push(row('none', 'Not during a drive', 'Pins dropped while not recording a drive', loose, false, false));
+    $('sessionList').innerHTML = rows.join('') || '<li class="empty">Your drives show up here, with the pins you dropped on each one.</li>';
+  }
+
+  function setTab(tab) {
+    listTab = tab;
+    for (const b of document.querySelectorAll('.tabbar .tab')) {
+      const on = b.dataset.tab === tab;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', on);
+    }
+    $('pinsView').hidden = tab !== 'pins';
+    $('sessionsView').hidden = tab !== 'sessions';
+    if (tab === 'pins') fillFilters();
+    renderList();
+  }
+  document.querySelectorAll('.tabbar .tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+
   function openList() { fillFilters(); renderList(); $('listPanel').hidden = false; }
   $('btnList').addEventListener('click', openList);
-  $('btnCount').addEventListener('click', openList);
-  ['listSearch', 'filterStatus', 'filterTag'].forEach((id) => $(id).addEventListener('input', renderList));
+  $('btnCount').addEventListener('click', () => { setTab('pins'); openList(); });
+  ['listSearch', 'filterStatus', 'filterTag', 'filterSession', 'sortBy'].forEach((id) => $(id).addEventListener('input', renderList));
   $('leadList').addEventListener('click', (e) => {
     const li = e.target.closest('.lead');
     if (!li) return;
@@ -867,11 +979,65 @@
   });
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => { $(b.dataset.close).hidden = true; }));
 
+  $('sessionList').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-sact]');
+    const li = e.target.closest('.session');
+    if (!btn || !li) return;
+    const id = li.dataset.id === 'none' ? '' : li.dataset.id;
+    const t = trails.get(id);
+    const act = btn.dataset.sact;
+    if (act === 'pins') {
+      $('listSearch').value = ''; $('filterStatus').value = ''; $('filterTag').value = '';
+      setTab('pins');
+      $('filterSession').value = id || 'none';
+      renderList();
+    } else if (act === 'map') showSessionOnMap(id);
+    else if (act === 'export') {
+      const name = t ? `drive-${new Date(t.startedAt).toISOString().slice(0, 10)}-leads.csv` : `leads-not-in-a-drive-${stamp()}.csv`;
+      await exportLeads(pinsInSession(id).sort(SORTS.oldest), name);
+    } else if (act === 'rename' && t) {
+      const name = prompt('Name this drive (leave empty to use the date):', t.name || '');
+      if (name === null) return;
+      t.name = name.trim().slice(0, 80);
+      if (!t.name) delete t.name;
+      await DB.put('trails', t);
+      renderList();
+    } else if (act === 'delete' && t) {
+      const n = pinsInSession(id).length;
+      if (!confirm(`Delete the drive "${sessionLabel(t)}"? Its route is removed.${n ? ` Its ${n} pin${n === 1 ? ' is' : 's are'} kept.` : ''}`)) return;
+      // Pins keep their place in the list; pin them to "not during a drive" so time matching can't move them.
+      for (const p of pinsInSession(id)) { p.sessionId = 'deleted'; await DB.put('pins', p); }
+      trails.delete(id);
+      await DB.del('trails', id);
+      focusLayer.clearLayers();
+      drawTrails();
+      renderList();
+    }
+  });
+
+  function showSessionOnMap(id) {
+    focusLayer.clearLayers();
+    const t = trails.get(id);
+    const list = pinsInSession(id);
+    const pts = [...(t ? t.points : []), ...list.map((p) => [p.lat, p.lng])];
+    if (!pts.length) { toast('Nothing to show on the map for this session yet.'); return; }
+    if (t && t.points.length > 1) {
+      L.polyline(t.points, { renderer: trailRenderer, color: '#D4882A', weight: 6, opacity: 0.9, interactive: false }).addTo(focusLayer);
+    }
+    $('listPanel').hidden = true;
+    closeSheet();
+    follow = false; updateLocateBtn();
+    map.fitBounds(L.latLngBounds(pts), { padding: [48, 48], maxZoom: 18 });
+    toast(`${t ? sessionLabel(t) : 'Not during a drive'}: ${list.length} pin${list.length === 1 ? '' : 's'}`, 'Hide route', () => focusLayer.clearLayers(), 8000);
+  }
+
   const CSV_COLUMNS = [
     'Parcel Number', 'Parcel Number (Formatted)', 'Property Address', 'Property City', 'Property State', 'Property Zip',
     'County', 'Owner First Name', 'Owner Last Name', 'Owner Full Name', 'Status', 'Tags', 'Notes',
     'Market Value', 'Year Built', 'Building Sq Ft', 'Acres', 'Owner Occupied', 'Latitude', 'Longitude', 'Date Added', 'Map Link',
+    'Drive Session',
   ];
+  const FREE_TEXT = new Set([7, 8, 9, 10, 11, 12, 22]); // columns people type into
   function splitName(full) {
     const n = (full || '').trim();
     if (!n) return ['', ''];
@@ -884,19 +1050,58 @@
     if (freeText && /^[=+@\t\r-]/.test(s)) s = "'" + s; // keep spreadsheets from running it as a formula
     return /[",\n\r]/.test(s) || s !== s.trim() ? `"${s.replace(/"/g, '""')}"` : s;
   }
+  const csvText = (rows) => '﻿' + rows.map((r) => r.join(',')).join('\r\n') + '\r\n';
   function toCsv(list) {
     const rows = [CSV_COLUMNS];
     for (const p of list) {
       const d = p.details || {};
       const [first, last] = splitName(p.ownerName);
+      const ses = trails.get(sessionOf(p));
       rows.push([
         p.parcelId, prettyParcel(p), p.address, p.city, p.address || p.city ? STATE : '', p.zip,
         p.county, first, last, p.ownerName, (STATUS[p.status] || STATUS.new).label, (p.tags || []).join('; '), p.notes,
         d.value || '', d.yearBuilt || '', d.sqft || '', d.acres || '', d.primaryRes || '', p.lat, p.lng,
         new Date(p.createdAt).toISOString().slice(0, 10), `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`,
-      ].map((v, i) => csvCell(v, i >= 7 && i <= 12)));
+        ses ? sessionLabel(ses) : '',
+      ].map((v, i) => csvCell(v, FREE_TEXT.has(i))));
     }
-    return '﻿' + rows.map((r) => r.join(',')).join('\r\n') + '\r\n';
+    return csvText(rows);
+  }
+  const SESSION_COLUMNS = ['Session', 'Date', 'Start Time', 'End Time', 'Duration (min)', 'Miles', 'Pins', ...STATUSES.map((s) => s.label), 'Pin Addresses'];
+  function sessionsCsv() {
+    const rows = [SESSION_COLUMNS];
+    for (const t of sortedSessions()) {
+      const list = pinsInSession(t.id).sort(SORTS.oldest);
+      rows.push([
+        sessionLabel(t), new Date(t.startedAt).toISOString().slice(0, 10), fmtTime(t.startedAt),
+        trail && t.id === trail.id ? 'In progress' : fmtTime(trailEnd(t)), sessionMinutes(t), trailMiles(t).toFixed(2), list.length,
+        ...STATUSES.map((s) => list.filter((p) => p.status === s.id).length),
+        list.map(addressLine).join('; '),
+      ].map((v, i) => csvCell(v, i === 0 || i === SESSION_COLUMNS.length - 1)));
+    }
+    return csvText(rows);
+  }
+  // One line per pin, for pasting into a text, email, or notes app.
+  function addressLine(p) {
+    const where = p.address
+      ? `${p.address}${p.city ? ', ' + p.city : ''}, ${STATE}${p.zip ? ' ' + p.zip : ''}`
+      : `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+    return where + (p.parcelId ? ` (Parcel ${prettyParcel(p)})` : '');
+  }
+  function sessionsText() {
+    const out = [];
+    for (const t of sortedSessions()) {
+      const list = pinsInSession(t.id).sort(SORTS.oldest);
+      out.push(`${sessionLabel(t)} · ${fmtDuration(sessionMinutes(t))} · ${trailMiles(t).toFixed(1)} mi · ${list.length} pin${list.length === 1 ? '' : 's'}`);
+      list.forEach((p, i) => out.push(`  ${i + 1}. ${addressLine(p)}`));
+      out.push('');
+    }
+    const loose = pinsInSession('').sort(SORTS.oldest);
+    if (loose.length) {
+      out.push(`Not during a drive · ${loose.length} pin${loose.length === 1 ? '' : 's'}`);
+      loose.forEach((p, i) => out.push(`  ${i + 1}. ${addressLine(p)}`));
+    }
+    return out.join('\n').trim();
   }
   async function saveFile(name, text, mime) {
     const blob = new Blob([text], { type: mime });
@@ -918,20 +1123,25 @@
   }
   const stamp = () => new Date().toISOString().slice(0, 10);
 
-  $('btnExport').addEventListener('click', async () => {
-    const list = filteredPins();
+  async function exportLeads(list, name) {
     if (!list.length) { toast('Nothing to export with these filters.'); return; }
-    const ok = await saveFile(`skip-trace-leads-${stamp()}.csv`, toCsv(list), 'text/csv');
+    const ok = await saveFile(name, toCsv(list), 'text/csv');
     if (!ok) return;
     const fresh = list.filter((p) => p.status === 'new');
     if (fresh.length && confirm(`Exported ${list.length} lead${list.length === 1 ? '' : 's'}.\n\nMark the ${fresh.length} new lead${fresh.length === 1 ? '' : 's'} as "Sent to skip trace"?`)) {
       await markSent(fresh);
     }
-  });
+  }
+  $('btnExport').addEventListener('click', () => exportLeads(filteredPins(), `skip-trace-leads-${stamp()}.csv`));
   $('btnCopyIds').addEventListener('click', () => {
     const ids = filteredPins().map((p) => p.parcelId).filter(Boolean);
     if (!ids.length) { toast('No parcel numbers in this list yet.'); return; }
     copyText(ids.join('\n'), `Copied ${ids.length} parcel number${ids.length === 1 ? '' : 's'}`);
+  });
+  $('btnCopyList').addEventListener('click', () => {
+    const list = filteredPins();
+    if (!list.length) { toast('Nothing in this list yet.'); return; }
+    copyText(list.map((p, i) => `${i + 1}. ${addressLine(p)}`).join('\n'), `Copied ${list.length} address${list.length === 1 ? '' : 'es'}`);
   });
   $('btnMarkSent').addEventListener('click', async () => {
     const fresh = filteredPins().filter((p) => p.status === 'new');
@@ -943,6 +1153,15 @@
     renderList();
     toast(`${list.length} marked as sent to skip trace.`);
   }
+  $('btnExportSessions').addEventListener('click', () => {
+    if (!trails.size) { toast('No drives to export yet.'); return; }
+    saveFile(`driving-sessions-${stamp()}.csv`, sessionsCsv(), 'text/csv');
+  });
+  $('btnCopySessions').addEventListener('click', () => {
+    const text = sessionsText();
+    if (!text) { toast('No sessions or pins yet.'); return; }
+    copyText(text, 'Sessions list copied');
+  });
 
   async function copyText(text, msg) {
     try { await navigator.clipboard.writeText(text); toast(msg); }
@@ -1019,7 +1238,10 @@
         if (pins.has(p.id) || findByParcel(p.parcelId, p.id)) continue;
         pins.set(p.id, p); await DB.put('pins', p); drawPin(p); added++;
       }
-      for (const t of data.trails || []) if (t && t.id && Array.isArray(t.points)) await DB.put('trails', t);
+      for (const t of data.trails || []) {
+        if (!t || !t.id || !Array.isArray(t.points) || trails.has(t.id)) continue;
+        trails.set(t.id, t); await DB.put('trails', t);
+      }
       for (const ph of data.photos || []) {
         if (!ph || !ph.dataUrl || !pins.has(ph.pinId)) continue;
         const blob = await (await fetch(ph.dataUrl)).blob();
@@ -1030,8 +1252,10 @@
     } catch (err) { toast(`Could not restore: ${err.message}`); }
   });
   $('btnClearRoutes').addEventListener('click', async () => {
-    if (!confirm('Delete all saved driving routes? Pins are kept.')) return;
+    if (!confirm('Delete all saved drives (routes and sessions)? Pins are kept.')) return;
     await DB.clear('trails');
+    for (const id of [...trails.keys()]) if (!trail || id !== trail.id) trails.delete(id);
+    focusLayer.clearLayers();
     drawTrails(); showStorage();
   });
   $('btnWipe').addEventListener('click', async () => {
@@ -1040,7 +1264,8 @@
     if (driving) await stopDriving();
     await Promise.all(['pins', 'photos', 'trails'].map((s) => DB.clear(s)));
     for (const id of [...pins.keys()]) undrawPin(id);
-    pins.clear(); closeSheet(); updateCounts(); drawTrails(); showStorage();
+    pins.clear(); trails.clear(); focusLayer.clearLayers();
+    closeSheet(); updateCounts(); drawTrails(); showStorage();
     toast('All data deleted.');
   });
 
@@ -1076,6 +1301,7 @@
     setBasemap(settings.basemap);
     updateNet();
     try {
+      for (const t of await DB.all('trails')) trails.set(t.id, t);
       for (const p of await DB.all('pins')) { pins.set(p.id, p); drawPin(p); }
     } catch (err) {
       toast('This browser blocked local storage, so pins cannot be saved. Try a normal (not private) window.');
@@ -1092,5 +1318,5 @@
   })();
 
   // Exposed for automated tests only.
-  window.__d4d = { map, pins, toCsv, splitName, distToRings, normalize };
+  window.__d4d = { map, pins, trails, toCsv, sessionsCsv, sessionOf, splitName, distToRings, normalize };
 })();

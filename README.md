@@ -22,7 +22,15 @@ photos, and routes are stored on the phone itself.
 - **Driving mode** follows your location, records the route you drove, shows miles, and
   keeps the screen on.
 - **Parcel lines** appear when you zoom in close, so you can see lot boundaries.
-- **Lead list** with search and filters by status and tag.
+- **Lead list** with search, filters by status, tag, and driving session, and sorting
+  (newest, oldest, address, status, or highest value).
+- **Sessions.** Every drive (Start driving to Stop driving) is saved as a session with its
+  date, time, duration, miles, and the pins you dropped on it. From the Sessions tab you can
+  view a drive's pins, show its route and pins on the map, export its pins as a CSV, rename it,
+  or delete it (pins are kept). Pins dropped while not driving are grouped as "Not during a drive".
+- **Export lists.** Export the sessions list as a CSV (one row per drive, with pin counts by
+  status and the pin addresses), copy it as plain text, or copy a numbered address list of the
+  pins currently shown.
 - **Export CSV for skip trace.** One row per lead, plus "Copy parcel #s" for a plain list.
   After export it offers to mark the leads as "Sent to skip trace".
 - **Works with weak signal.** If the parcel lookup fails, the pin is saved and the lookup
@@ -34,7 +42,7 @@ photos, and routes are stored on the phone itself.
 `Parcel Number, Parcel Number (Formatted), Property Address, Property City, Property State,
 Property Zip, County, Owner First Name, Owner Last Name, Owner Full Name, Status, Tags, Notes,
 Market Value, Year Built, Building Sq Ft, Acres, Owner Occupied, Latitude, Longitude,
-Date Added, Map Link`
+Date Added, Map Link, Drive Session`
 
 Most skip tracing services match on property address, city, state, and ZIP, and map those
 columns on upload. Tip: if you open the CSV in Excel first, the 14-digit "Parcel Number"

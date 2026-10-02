@@ -136,9 +136,14 @@ async function main() {
   await page.waitForTimeout(500);
   const stat = await page.textContent('#driveStat');
   check(/Driving · \d/.test(stat), `drive mode tracks distance (${stat})`);
+  await page.mouse.click(195, 300);
+  await page.waitForSelector('#sheet:not([hidden]) .pid');
   await page.screenshot({ path: `${OUT}/3-driving.png` });
+  await page.click('#sheet [data-act="close"]');
   await page.click('#btnDrive');
   await page.waitForTimeout(300);
+  const ses = await page.evaluate(() => { const d = window.__d4d; const t = [...d.trails.values()][0]; return { n: d.trails.size, pins: [...d.pins.values()].filter((p) => p.sessionId === (t && t.id)).length }; });
+  check(ses.n === 1 && ses.pins === 1, `drive is saved as a session with its pin (${ses.n} session, ${ses.pins} pin)`);
 
   // 8. List + export
   await page.click('#btnList');
@@ -162,6 +167,30 @@ async function main() {
   await page.click('#btnCopyIds');
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   check(clip.split('\n').length >= 3 && /^\d{14}$/.test(clip.split('\n')[0]), 'copy parcel #s puts one ID per line on clipboard');
+
+  // 8b. Sessions tab: list, filter pins by session, export
+  await page.click('#tabSessions');
+  check(await page.$$eval('#sessionList .session', (els) => els.length) === 2, 'sessions tab shows the drive plus "Not during a drive"');
+  check(/1\s*pin/.test(await page.textContent('#sessionList .session')), 'session card counts its pins');
+  await page.screenshot({ path: `${OUT}/4b-sessions.png` });
+  const [sdl] = await Promise.all([page.waitForEvent('download'), page.click('#btnExportSessions')]);
+  const scsv = fs.readFileSync(await sdl.path(), 'utf8').replace(/^\ufeff/, '').trim().split('\r\n');
+  check(scsv.length === 2 && scsv[0].startsWith('Session,Date,Start Time') && /MAIN ST/.test(scsv[1]), 'sessions CSV lists each drive with its pin addresses');
+  await page.click('#btnCopySessions');
+  check(/Not during a drive/.test(await page.evaluate(() => navigator.clipboard.readText())), 'copy sessions list includes every pin group');
+  await page.click('#sessionList .session [data-sact="pins"]');
+  check(!(await page.isHidden('#pinsView')) && await page.$$eval('#leadList .lead', (els) => els.length) === 1, 'view pins filters the pin list to that session');
+  const [pdl] = await Promise.all([page.waitForEvent('download'), page.click('#btnExport')]);
+  const pcsv = fs.readFileSync(await pdl.path(), 'utf8').replace(/^\ufeff/, '').trim().split('\r\n');
+  check(pcsv[0].endsWith(',Drive Session') && pcsv.length === 2 && !pcsv[1].endsWith(','), 'pin CSV includes the drive session');
+  await page.selectOption('#filterSession', '');
+  await page.click('#btnCopyList');
+  check(/^1\. .*MAIN ST.*, UT 84047/.test(await page.evaluate(() => navigator.clipboard.readText())), 'copy address list makes a numbered list');
+  await page.click('#tabSessions');
+  await page.click('#sessionList .session [data-sact="map"]');
+  check(await page.isHidden('#listPanel'), 'show on map closes the list and focuses the drive');
+  await page.click('#btnList');
+  await page.click('#tabPins');
   await page.click('[data-close="listPanel"]');
 
   // 9. Persistence across reload
@@ -189,7 +218,7 @@ async function main() {
   check(backup.app === 'mk-d4d' && backup.pins.length === parseInt(before), 'backup contains all pins');
 
   // 12. Service worker installs + caches shell
-  const swOk = await page.evaluate(async () => { const reg = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready; const keys = await caches.keys(); const c = await caches.open('d4d-v1'); return keys.includes('d4d-v1') && (await c.keys()).length >= 8; });
+  const swOk = await page.evaluate(async () => { const reg = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready; const keys = await caches.keys(); const c = await caches.open('d4d-v2'); return keys.includes('d4d-v2') && (await c.keys()).length >= 8; });
   check(swOk, 'service worker installs and caches the app shell');
 
   // satellite toggle
